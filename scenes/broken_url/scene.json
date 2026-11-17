@@ -1,0 +1,1 @@
+{"format": "scenepin.scene/1", "name": "broken-url", "render": {"width": 64, "height": 64, "background": "#000000", "light": [0, 1, 0]}, "camera": {"position": [0, 0, 3], "look_at": [0, 0, 0], "fov": 45}, "models": [{"path": "https://assets.example.invalid/cube.obj"}], "overlays": []}

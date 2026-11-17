@@ -1,0 +1,68 @@
+{
+ "format": "scenepin.scene/1",
+ "name": "demo",
+ "render": {
+  "width": 400,
+  "height": 300,
+  "background": "#101826",
+  "light": [
+   0.5,
+   1.0,
+   0.35
+  ]
+ },
+ "camera": {
+  "position": [
+   3.4,
+   2.6,
+   4.4
+  ],
+  "look_at": [
+   0,
+   0.35,
+   0
+  ],
+  "fov": 45
+ },
+ "models": [
+  {
+   "path": "models/ground.obj",
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.0
+  },
+  {
+   "path": "models/cube.obj",
+   "position": [
+    0.9,
+    0.6,
+    0.2
+   ],
+   "scale": 1.0
+  },
+  {
+   "path": "models/pyramid.obj",
+   "position": [
+    -1.5,
+    0,
+    -0.6
+   ],
+   "scale": 1.0
+  }
+ ],
+ "overlays": [
+  {
+   "text": "SCENEPIN REV 3",
+   "font": "fonts/ui.font.json",
+   "position": [
+    12,
+    12
+   ],
+   "size": 14,
+   "color": "#ffd166"
+  }
+ ]
+}

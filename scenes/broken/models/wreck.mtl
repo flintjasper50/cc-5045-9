@@ -1,0 +1,3 @@
+newmtl wreck_mat
+Kd 1 0 0
+map_Kd ../textures/ghost.png
