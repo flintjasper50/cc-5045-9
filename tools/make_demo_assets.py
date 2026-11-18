@@ -184,16 +184,18 @@ def write_models(model_dir):
         (model_dir / name).write_text(text, encoding="utf-8")
 
 
-def write_scene(scene_dir, rev_text):
+def write_scene(scene_dir, rev_text, time_ms=0.0, plugins=None):
     scene = {
         "format": "scenepin.scene/1",
         "name": "demo",
         "render": {"width": 400, "height": 300, "background": "#18202e",
                    "light": [0.5, 1.0, 0.35]},
         "camera": {"position": [3.4, 2.6, 4.4], "look_at": [0, 0.35, 0], "fov": 45},
+        "animation": {"time_ms": time_ms, "fps": 24},
         "models": [
             {"path": "models/ground.obj", "position": [0, 0, 0], "scale": 1.0},
-            {"path": "models/cube.obj", "position": [0.9, 0.6, 0.2], "scale": 1.0},
+            {"path": "models/cube.obj", "position": [0.9, 0.6, 0.2], "scale": 1.0,
+             "spin": 90.0},
             {"path": "models/pyramid.obj", "position": [-1.5, 0, -0.6], "scale": 1.0},
         ],
         "overlays": [
@@ -201,16 +203,18 @@ def write_scene(scene_dir, rev_text):
              "position": [12, 12], "size": 14, "color": "#ffd166"},
         ],
     }
+    if plugins:
+        scene["plugins"] = plugins
     (scene_dir / "scene.json").write_text(
         json.dumps(scene, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def make_demo(demo_dir, palette="v1", rev_text="SCENEPIN REV 1"):
+def make_demo(demo_dir, palette="v1", rev_text="SCENEPIN REV 1", time_ms=0.0, plugins=None):
     demo_dir = Path(demo_dir)
     write_textures(demo_dir / "textures", palette)
     write_font(demo_dir / "fonts")
     write_models(demo_dir / "models")
-    write_scene(demo_dir, rev_text)
+    write_scene(demo_dir, rev_text, time_ms=time_ms, plugins=plugins)
 
 
 def make_broken(root):

@@ -12,6 +12,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import faults, fingerprint
+from .compare import pixel_sha256_of_png
 from .errors import NodeError, PinError
 from .render import render_scene
 
@@ -54,6 +56,7 @@ class Node:
             "platform": platform.platform(),
             "python": platform.python_version(),
             "pid": os.getpid(),
+            "workdir": str(self.work),
             "started": started,
             "finished": _utcnow(),
             "duration_ms": int((time.monotonic() - started_ts) * 1000),
@@ -63,6 +66,7 @@ class Node:
         started, started_ts = _utcnow(), time.monotonic()
         fetch_log, verify = [], []
         env = lambda: self._env(started, started_ts)  # noqa: E731
+        skip_verify = faults.enabled("no-verify")
         try:
             manifest = self.store.load_revision(rev)
         except KeyError as exc:
@@ -76,7 +80,7 @@ class Node:
                 source = None
                 if cpath.exists():
                     data = cpath.read_bytes()
-                    if hashlib.sha256(data).hexdigest() == h:
+                    if skip_verify or hashlib.sha256(data).hexdigest() == h:
                         source = "cache-hit"
                     else:
                         source = "cache-corrupt-refetch"
@@ -95,7 +99,7 @@ class Node:
                 fetch_log.append({"path": a["path"], "sha256": h, "source": source, "bytes": len(data)})
                 verify.append({"path": a["path"], "role": a["role"], "expected": h,
                                "actual": actual, "source": source, "ok": ok})
-                if not ok:
+                if not ok and not skip_verify:
                     raise NodeError(f"资源校验失败: {a['path']!r} 内容哈希与清单不符",
                                     {"path": a["path"], "expected": h, "actual": actual})
             loader = ManifestLoader(manifest, self.cache)
@@ -103,11 +107,17 @@ class Node:
             out_hash = hashlib.sha256(png).hexdigest()
             out_file = self.out / f"{rev}.png"
             out_file.write_bytes(png)
+            settings = manifest["settings"]
             return {"node": self.id, "revision": rev, "status": "ok",
-                    "output": {"sha256": out_hash, "bytes": len(png),
-                               "width": manifest["settings"]["render"]["width"],
-                               "height": manifest["settings"]["render"]["height"],
+                    "fingerprint": fingerprint.of_manifest(manifest),
+                    "output": {"sha256": out_hash,
+                               "pixel_sha256": pixel_sha256_of_png(png),
+                               "bytes": len(png),
+                               "width": settings["render"]["width"],
+                               "height": settings["render"]["height"],
                                "file": str(out_file)},
+                    "used": {"animation": settings.get("animation"),
+                             "plugins": settings.get("plugins")},
                     "assets": verify, "fetch": fetch_log, "env": env()}
         except (NodeError, PinError) as exc:
             # 失败节点保留可诊断原因：已完成的校验、取数日志与环境一并落账

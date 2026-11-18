@@ -7,12 +7,20 @@
 import math
 import posixpath
 
+from . import faults
 from .pngio import Image, decode_png, encode_png
 from .scenefile import parse_font, parse_mtl, parse_obj, resolve_ref
 
 
 def _hexrgb(s):
     return (int(s[1:3], 16), int(s[3:5], 16), int(s[5:7], 16))
+
+
+def _rotate_y(v, radians):
+    if radians == 0.0:
+        return v
+    c, s = math.cos(radians), math.sin(radians)
+    return (v[0] * c - v[2] * s, v[1], v[0] * s + v[2] * c)
 
 
 def _norm(v):
@@ -104,7 +112,7 @@ def _draw_tri(img, zbuf, p0, p1, p2, uv0, uv1, uv2, kd, tex, intensity):
             data[i3 + 2] = min(255, int(b * intensity))
 
 
-def _render_model(load_blob, model, img, zbuf, cam, light):
+def _render_model(load_blob, model, img, zbuf, cam, light, anim_seconds):
     obj = parse_obj(load_blob(model["path"]).decode("utf-8"), model["path"])
     obj_dir = posixpath.dirname(model["path"])
     mats = {}
@@ -120,7 +128,11 @@ def _render_model(load_blob, model, img, zbuf, cam, light):
             mats[name] = (mat["kd"], tex)
     s = model.get("scale", 1.0)
     t = model.get("position", [0.0, 0.0, 0.0])
-    verts = [((v[0] * s) + t[0], (v[1] * s) + t[1], (v[2] * s) + t[2]) for v in obj["verts"]]
+    angle = math.radians(model.get("spin", 0.0) * anim_seconds)
+    verts = []
+    for v in obj["verts"]:
+        x, y, z = _rotate_y((v[0] * s, v[1] * s, v[2] * s), angle)
+        verts.append((x + t[0], y + t[1], z + t[2]))
     uvs = obj["uvs"]
     for a, b, c, mat_name in obj["tris"]:
         pa = cam.project(verts[a[0] - 1])
@@ -169,6 +181,37 @@ def _render_overlay(load_blob, ov, img):
         cx += gl["advance"] * scale
 
 
+def _apply_plugins(img, plugins):
+    """确定性后处理：曝光增益 → 色调混合 → 暗角。"""
+    gain = (plugins.get("exposure") or {}).get("gain", 1.0)
+    tint = plugins.get("tint") or {}
+    tr, tg, tb = _hexrgb(tint.get("color", "#ffffff"))
+    amount = tint.get("amount", 0.0)
+    strength = (plugins.get("vignette") or {}).get("strength", 0.0)
+    if gain == 1.0 and amount == 0.0 and strength == 0.0:
+        return
+    w, h, data = img.width, img.height, img.data
+    cx, cy = (w - 1) * 0.5, (h - 1) * 0.5
+    maxd2 = (cx * cx + cy * cy) or 1.0
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * 3
+            r, g, b = data[i], data[i + 1], data[i + 2]
+            if gain != 1.0:
+                r, g, b = r * gain, g * gain, b * gain
+            if amount != 0.0:
+                r = r * (1.0 - amount) + tr * amount
+                g = g * (1.0 - amount) + tg * amount
+                b = b * (1.0 - amount) + tb * amount
+            if strength != 0.0:
+                dx, dy = x - cx, y - cy
+                f = 1.0 - strength * (dx * dx + dy * dy) / maxd2
+                r, g, b = r * f, g * f, b * f
+            data[i] = min(255, max(0, int(r)))
+            data[i + 1] = min(255, max(0, int(g)))
+            data[i + 2] = min(255, max(0, int(b)))
+
+
 def render_scene(manifest, load_blob):
     """按清单设置出图，返回 PNG 字节。全程确定性，同清单必得同像素。"""
     st = manifest["settings"]
@@ -179,8 +222,12 @@ def render_scene(manifest, load_blob):
     zbuf = [float("inf")] * (w * h)
     light = _norm(r["light"])
     cam = _Camera(st["camera"], w, h)
+    anim = st.get("animation") or {"time_ms": 0.0, "fps": 24}
+    time_ms = 0.0 if faults.enabled("zero-time") else anim["time_ms"]
+    anim_seconds = time_ms / 1000.0
     for model in st["models"]:
-        _render_model(load_blob, model, img, zbuf, cam, light)
+        _render_model(load_blob, model, img, zbuf, cam, light, anim_seconds)
     for ov in st.get("overlays", []):
         _render_overlay(load_blob, ov, img)
+    _apply_plugins(img, st.get("plugins") or {})
     return encode_png(img)

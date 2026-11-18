@@ -23,6 +23,19 @@ from .errors import PinError
 SCENE_FORMAT = "scenepin.scene/1"
 FONT_FORMAT = "scenepin.font/1"
 
+# 动画时刻与插件参数的默认值（缺省即按此解析，并记入清单）
+ANIMATION_DEFAULTS = {"time_ms": 0.0, "fps": 24}
+PLUGIN_DEFAULTS = {
+    "exposure": {"gain": 1.0},
+    "vignette": {"strength": 0.0},
+    "tint": {"color": "#ffffff", "amount": 0.0},
+}
+PLUGIN_RANGES = {
+    "exposure": {"gain": (0.0, 8.0)},
+    "vignette": {"strength": (0.0, 1.0)},
+    "tint": {"amount": (0.0, 1.0)},
+}
+
 ROLE_EXTS = {
     "scene": (".json",),
     "model": (".obj",),
@@ -47,7 +60,10 @@ POLICY = {
         "白名单外扩展名",
         "渲染期打开清单外路径（闭合依赖集约束）",
         "OBJ 负索引、带选项参数的 map_Kd、16 位/隔行/调色板 PNG",
+        "未知插件名或插件参数越界",
     ],
+    "animation": "animation.time_ms/fps 冻结动画时刻；模型 spin 为每秒绕 Y 轴角度",
+    "plugins": sorted(PLUGIN_DEFAULTS),
 }
 
 
@@ -224,6 +240,54 @@ def _vec(value, n, entry, where):
     return [float(v) for v in value]
 
 
+def _parse_animation(doc, entry):
+    a = doc.get("animation") or {}
+    if not isinstance(a, dict):
+        raise PinError("animation 须为对象", [_ref(entry, "animation")])
+    time_ms = a.get("time_ms", ANIMATION_DEFAULTS["time_ms"])
+    fps = a.get("fps", ANIMATION_DEFAULTS["fps"])
+    if not isinstance(time_ms, (int, float)) or time_ms < 0:
+        raise PinError("animation.time_ms 须为非负数", [_ref(entry, "animation.time_ms")])
+    if not isinstance(fps, (int, float)) or not (0 < fps <= 240):
+        raise PinError("animation.fps 须在 (0,240] 区间", [_ref(entry, "animation.fps")])
+    return {"time_ms": float(time_ms), "fps": float(fps)}
+
+
+def _parse_plugins(doc, entry):
+    raw = doc.get("plugins") or {}
+    if not isinstance(raw, dict):
+        raise PinError("plugins 须为对象", [_ref(entry, "plugins")])
+    unknown = sorted(set(raw) - set(PLUGIN_DEFAULTS))
+    if unknown:
+        raise PinError(f"未知插件: {', '.join(unknown)}", [_ref(entry, "plugins")])
+    out = {}
+    for name, defaults in PLUGIN_DEFAULTS.items():
+        given = raw.get(name) or {}
+        where = f"plugins.{name}"
+        if not isinstance(given, dict):
+            raise PinError(f"{where} 须为对象", [_ref(entry, where)])
+        unknown_keys = sorted(set(given) - set(defaults))
+        if unknown_keys:
+            raise PinError(f"{where} 含未知参数: {', '.join(unknown_keys)}", [_ref(entry, where)])
+        params = dict(defaults)
+        for key, default in defaults.items():
+            if key not in given:
+                continue
+            value = given[key]
+            if isinstance(default, str):
+                params[key] = _color(value, entry, f"{where}.{key}")
+            else:
+                if not isinstance(value, (int, float)):
+                    raise PinError(f"{where}.{key} 须为数值", [_ref(entry, f"{where}.{key}")])
+                lo, hi = PLUGIN_RANGES[name][key]
+                if not (lo <= value <= hi):
+                    raise PinError(f"{where}.{key} 须在 [{lo},{hi}] 区间",
+                                   [_ref(entry, f"{where}.{key}")])
+                params[key] = float(value)
+        out[name] = params
+    return out
+
+
 def parse_scene(text, entry):
     try:
         doc = json.loads(text)
@@ -252,7 +316,8 @@ def parse_scene(text, entry):
             raise PinError("模型项缺少 path", [_ref(entry, where)])
         models.append({"path": m["path"],
                        "position": _vec(m.get("position", [0, 0, 0]), 3, entry, where + ".position"),
-                       "scale": float(m.get("scale", 1.0))})
+                       "scale": float(m.get("scale", 1.0)),
+                       "spin": float(m.get("spin", 0.0))})
     if not models:
         raise PinError("场景至少需要一个模型", [_ref(entry, "models")])
     overlays = []
@@ -265,7 +330,9 @@ def parse_scene(text, entry):
                          "size": float(o.get("size", 12)),
                          "color": _color(o.get("color", "#ffffff"), entry, where + ".color")})
     return {"name": doc.get("name") or "scene", "render": render, "camera": camera,
-            "models": models, "overlays": overlays}
+            "models": models, "overlays": overlays,
+            "animation": _parse_animation(doc, entry),
+            "plugins": _parse_plugins(doc, entry)}
 
 
 # ---------------------------------------------------------------- 依赖闭包
